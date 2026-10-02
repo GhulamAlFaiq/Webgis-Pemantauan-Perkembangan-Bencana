@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebGIS Pemantauan Bencana Indonesia</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+  <!-- Google Fonts & FontAwesome -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+  <!-- App styles -->
+  <link rel="stylesheet" href="style.css" />
+
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+    #map { width: 100vw; height: 100vh; position: absolute; inset: 0; z-index: 1; }
+    .navbar__actions { display: flex; align-items: center; gap: 18px; flex-shrink: 0; }
+    .auth-area { display: flex; align-items: center; }
+    .auth-user { display: flex; align-items: center; gap: 10px; }
+    .auth-user[hidden], .auth-form[hidden], .auth-message[hidden], #authOpenBtn[hidden] { display: none; }
+    .auth-btn { display: inline-flex; align-items: center; gap: 7px; padding: 7px 14px; border-radius: var(--radius-sm, 10px); font-family: var(--font-base, inherit); font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: filter 0.15s, background 0.15s, border-color 0.15s; }
+    .auth-btn--login { background: var(--color-accent, #ff6b35); color: #fff; border: none; box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3); }
+    .auth-btn--login:hover { filter: brightness(1.07); }
+    .auth-btn--logout { background: rgba(255, 255, 255, 0.08); color: #fff; border: 1px solid rgba(255, 255, 255, 0.22); }
+    .auth-btn--logout:hover { background: rgba(255, 255, 255, 0.16); }
+    .auth-user__name { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.9); max-width: 160px; }
+    .auth-user__name i { color: var(--color-accent-light, #ff8c5a); font-size: 15px; }
+    #authUsername { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .auth-tabs { display: flex; border-bottom: 1px solid var(--color-border, rgba(15, 23, 42, 0.09)); padding: 0 20px; }
+    .auth-tab { flex: 1; padding: 12px 8px; background: none; border: none; border-bottom: 2.5px solid transparent; margin-bottom: -1px; font-family: var(--font-base, inherit); font-size: 13.5px; font-weight: 700; color: var(--color-text-muted, #64748b); cursor: pointer; transition: color 0.15s, border-color 0.15s; }
+    .auth-tab:hover { color: var(--color-ink, #0b1626); }
+    .auth-tab.is-active { color: var(--color-accent, #ff6b35); border-bottom-color: var(--color-accent, #ff6b35); }
+    .auth-message { margin: 0 0 12px; padding: 9px 12px; border-radius: var(--radius-sm, 10px); font-size: 12.5px; font-weight: 600; line-height: 1.4; }
+    .auth-message--error { background: rgba(228, 72, 60, 0.1); color: #b3291f; border: 1px solid rgba(228, 72, 60, 0.3); }
+    .auth-message--success { background: rgba(34, 166, 153, 0.12); color: #146d64; border: 1px solid rgba(34, 166, 153, 0.35); }
+    @media (max-width: 720px) {
+      .navbar__actions { gap: 10px; }
+      .auth-btn__text { display: none; }
+      .auth-btn { padding: 8px 11px; }
+      .auth-user__name { max-width: 90px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navbar -->
+  <header class="navbar">
+    <div class="navbar__brand">
+      <i class="fa-solid fa-triangle-exclamation navbar__logo"></i>
+      <div class="navbar__title-group">
+        <h1 class="navbar__title">WebGIS Pemantauan Bencana Indonesia</h1>
+        <span class="navbar__subtitle">Spatiotemporal Disaster Monitoring — Indonesia</span>
+      </div>
+    </div>
+    <div class="navbar__actions">
+      <div class="navbar__status">
+        <button id="adminPanelBtn" class="btn-admin-panel" style="display: none;">
+          <i class="fa-solid fa-shield-halved"></i> Panel Moderasi
+        </button>
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="lastUpdated">Data termutakhir: —</span>
+      </div>
+
+      <div id="authArea" class="auth-area">
+        <button type="button" id="authOpenBtn" class="auth-btn auth-btn--login">
+          <i class="fa-solid fa-right-to-bracket"></i>
+          <span class="auth-btn__text">Login / Daftar</span>
+        </button>
+        <div id="authUser" class="auth-user" hidden>
+          <span class="auth-user__name">
+            <i class="fa-solid fa-circle-user"></i>
+            <span id="authUsername"></span>
+          </span>
+          <button type="button" id="logoutBtn" class="auth-btn auth-btn--logout">
+            <i class="fa-solid fa-right-from-bracket"></i>
+            <span class="auth-btn__text">Logout</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Map Container -->
+  <main id="map" class="map"></main>
+
+  <!-- Sidebar Toggle -->
+  <button id="sidebarToggle" class="sidebar-toggle" aria-label="Buka panel" aria-expanded="true">
+    <i class="fa-solid fa-chevron-left"></i>
+  </button>
+
+  <!-- Floating Sidebar -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar__header">
+      <h2 class="sidebar__heading">Panel Kontrol</h2>
+      <button id="sidebarCollapse" class="icon-btn" aria-label="Tutup panel">
+        <i class="fa-solid fa-chevron-left"></i>
+      </button>
+    </div>
+
+    <div class="sidebar__scroll">
+      <section class="panel-section">
+        <h3 class="panel-section__title">
+          <i class="fa-solid fa-chart-simple"></i> Ringkasan Data
+        </h3>
+        <div class="stats-grid">
+          <div class="stat-card stat-card--danger">
+            <span class="stat-card__value" id="statTotalActive">0</span>
+            <span class="stat-card__label"><i class="fa-solid fa-triangle-exclamation"></i> Insiden Aktif</span>
+          </div>
+          <div class="stat-card stat-card--warning">
+            <span class="stat-card__value" id="statMostFrequent">-</span>
+            <span class="stat-card__label"><i class="fa-solid fa-chart-simple"></i> Jenis Tersering</span>
+          </div>
+          <div class="stat-card stat-card--primary">
+            <span class="stat-card__value" id="statUserReports">0</span>
+            <span class="stat-card__label"><i class="fa-solid fa-users"></i> Laporan Warga</span>
+          </div>
+          <div class="stat-card stat-card--safe">
+            <span class="stat-card__value" id="statLastUpdate">-</span>
+            <span class="stat-card__label"><i class="fa-solid fa-clock"></i> Update Terakhir</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel-section">
+        <h3 class="panel-section__title">
+          <i class="fa-solid fa-layer-group"></i> Layer Bencana
+        </h3>
+        <ul class="layer-list" id="layerList">
+          <li class="layer-item">
+            <label class="layer-item__label">
+              <input type="checkbox" class="layer-item__checkbox" data-layer="flood" checked />
+              <i class="fa-solid fa-water layer-item__icon layer-item__icon--danger"></i>
+              <span>Titik Banjir</span>
+            </label>
+          </li>
+          <li class="layer-item">
+            <label class="layer-item__label">
+              <input type="checkbox" class="layer-item__checkbox" data-layer="wind" checked />
+              <i class="fa-solid fa-wind layer-item__icon layer-item__icon--warning"></i>
+              <span>Angin Kencang</span>
+            </label>
+          </li>
+          <li class="layer-item">
+            <label class="layer-item__label">
+              <input type="checkbox" class="layer-item__checkbox" data-layer="landslide" checked />
+              <i class="fa-solid fa-mountain layer-item__icon layer-item__icon--warning"></i>
+              <span>Titik Longsor</span>
+            </label>
+          </li>
+          <li class="layer-item">
+            <label class="layer-item__label">
+              <input type="checkbox" class="layer-item__checkbox" data-layer="earthquake" checked />
+              <i class="fa-solid fa-house-crack layer-item__icon layer-item__icon--primary"></i>
+              <span>Titik Gempa (PetaBencana)</span>
+            </label>
+          </li>
+          <li class="layer-item">
+            <label class="layer-item__label">
+              <input type="checkbox" class="layer-item__checkbox" data-layer="gempa" checked />
+              <i class="fa-solid fa-satellite-dish layer-item__icon layer-item__icon--danger"></i>
+              <span>Gempa Dirasakan (BMKG)</span>
+            </label>
+          </li>
+          <li class="layer-item">
+            <label class="layer-item__label">
+              <input type="checkbox" id="chk-shelter" class="layer-item__checkbox" data-layer="shelter" checked />
+              <i class="fa-solid fa-house-medical layer-item__icon layer-item__icon--safe"></i>
+              <span>Titik Evakuasi</span>
+            </label>
+          </li>
+        </ul>
+      </section>
+
+      <section class="panel-section">
+        <h3 class="panel-section__title">
+          <i class="fa-solid fa-cloud-bolt"></i> Overlay Tambahan
+        </h3>
+        <ul class="layer-list">
+          <li class="layer-item">
+            <label class="layer-item__label">
+              <input type="checkbox" class="layer-item__checkbox" id="weatherToggle" data-layer="weather" checked />
+              <i class="fa-solid fa-cloud-sun layer-item__icon layer-item__icon--primary"></i>
+              <span>Info Cuaca (Klik Peta)</span>
+            </label>
+          </li>
+        </ul>
+      </section>
+
+      <section class="panel-section">
+        <h3 class="panel-section__title">
+          <i class="fa-solid fa-bullhorn"></i> Pelaporan
+        </h3>
+        <p class="panel-section__hint">Laporkan kejadian bencana secara langsung dari lokasi Anda.</p>
+        <button id="reportBtn" class="btn btn--primary btn--report">
+          <i class="fa-solid fa-map-pin"></i> Lapor Bencana
+        </button>
+        <button id="locateBtn" class="btn btn--ghost">
+          <i class="fa-solid fa-location-crosshairs"></i> Lokasi Saya
+        </button>
+        <button id="exportGeoJsonBtn" class="btn btn--ghost">
+          <i class="fa-solid fa-download"></i> Download GeoJSON Laporan
+        </button>
+      </section>
+    </div>
+  </aside>
+
+  <!-- Report Modal -->
+  <div id="reportModal" class="modal-overlay" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reportModalTitle">
+      <div class="modal__header">
+        <h2 id="reportModalTitle" class="modal__title">
+          <i class="fa-solid fa-map-pin"></i> Lapor Bencana
+        </h2>
+        <button type="button" id="reportModalClose" class="icon-btn" aria-label="Tutup">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="reportForm" class="modal__body">
+        <div class="form-row">
+          <div class="form-group form-group--half">
+            <label for="reportLat">Latitude</label>
+            <input type="text" id="reportLat" name="lat" readonly />
+          </div>
+          <div class="form-group form-group--half">
+            <label for="reportLng">Longitude</label>
+            <input type="text" id="reportLng" name="lng" readonly />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="reportType">Jenis Bencana</label>
+          <select id="reportType" name="disasterType" required>
+            <option value="flood">Banjir</option>
+            <option value="landslide">Tanah Longsor</option>
+            <option value="wind">Angin Kencang</option>
+            <option value="earthquake">Gempa Bumi</option>
+            <option value="other">Lainnya</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="reportDescription">Deskripsi / Ketinggian Air / Kondisi</label>
+          <textarea
+            id="reportDescription"
+            name="description"
+            rows="3"
+            placeholder="Contoh: Ketinggian air sekitar 30 cm, jalan tidak bisa dilalui motor..."
+          ></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="reportPhoto">Foto Bencana (Maksimal 4 MB)</label>
+          <input type="file" id="reportPhoto" accept="image/*">
+        </div>
+
+        <div class="form-group">
+          <label for="reportName">Nama Pelapor</label>
+          <input type="text" id="reportName" name="reporterName" placeholder="Anonim" />
+        </div>
+
+        <div class="modal__actions">
+          <button type="button" id="reportCancelBtn" class="btn btn--ghost">Batal</button>
+          <button type="submit" id="reportSubmitBtn" class="btn btn--primary">
+            <i class="fa-solid fa-paper-plane"></i> Kirim Laporan
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Admin Moderation Modal -->
+  <div id="adminModal" class="modal-overlay" aria-hidden="true">
+    <div class="modal" role="dialog" style="width: 520px;">
+      <div class="modal__header">
+        <h2 class="modal__title"><i class="fa-solid fa-shield-halved"></i> Panel Moderasi Admin</h2>
+        <button type="button" id="adminModalClose" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="adminPendingList" class="modal__body" style="gap: 12px; max-height: 70vh; overflow-y: auto;">
+        <!-- Cards pending dimuat via admin.js -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Auth Modal -->
+  <div id="authModal" class="modal-overlay" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+      <div class="modal__header">
+        <h2 id="authModalTitle" class="modal__title">
+          <i class="fa-solid fa-user-lock"></i> Akun Pengguna
+        </h2>
+        <button type="button" id="authModalClose" class="icon-btn" aria-label="Tutup">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="auth-tabs" role="tablist">
+        <button type="button" class="auth-tab is-active" role="tab" aria-selected="true" data-auth-tab="login">Login</button>
+        <button type="button" class="auth-tab" role="tab" aria-selected="false" data-auth-tab="signup">Daftar</button>
+      </div>
+
+      <div class="modal__body">
+        <p id="authMessage" class="auth-message" role="alert" hidden></p>
+
+        <!-- Login -->
+        <form id="loginForm" class="auth-form" autocomplete="on">
+          <div class="form-group">
+            <label for="loginUsername">Username</label>
+            <input type="text" id="loginUsername" name="username" autocomplete="username" required />
+          </div>
+          <div class="form-group">
+            <label for="loginPassword">Password</label>
+            <input type="password" id="loginPassword" name="password" autocomplete="current-password" required />
+          </div>
+          <div class="modal__actions">
+            <button type="submit" id="loginSubmitBtn" class="btn btn--primary">
+              <i class="fa-solid fa-right-to-bracket"></i> Login
+            </button>
+          </div>
+        </form>
+
+        <!-- index.html — Perbarui Form Signup di Auth Modal -->
+<form id="signupForm" class="auth-form" autocomplete="on" hidden>
+  <div class="form-group">
+    <label for="signupUsername">Username</label>
+    <input type="text" id="signupUsername" name="username" autocomplete="username" minlength="3" maxlength="30" placeholder="3–30 karakter" required />
+  </div>
+  <div class="form-group">
+    <label for="signupPassword">Password</label>
+    <input type="password" id="signupPassword" name="password" autocomplete="new-password" minlength="6" placeholder="Minimal 6 karakter" required />
+  </div>
+  
+  <!-- BISA ISI KODE INI JIKA INGIN DAFTAR SEBAGAI ADMIN -->
+  <div class="form-group">
+    <label for="signupAdminCode">Kode Akses Admin <small style="color:#888;font-weight:normal;">(Opsional)</small></label>
+    <input type="password" id="signupAdminCode" name="adminCode" placeholder="Masukkan kode rahasia jika Anda Admin" />
+  </div>
+
+  <div class="modal__actions">
+    <button type="submit" id="signupSubmitBtn" class="btn btn--primary">
+      <i class="fa-solid fa-user-plus"></i> Daftar
+    </button>
+  </div>
+</form>
+
+<!-- index.html — Perbarui Modal Admin (Tambahkan Tab Kelola Pengguna) -->
+<div id="adminModal" class="modal-overlay" aria-hidden="true">
+  <div class="modal" role="dialog" style="width: 580px;">
+    <div class="modal__header">
+      <h2 class="modal__title"><i class="fa-solid fa-shield-halved"></i> Panel Moderasi Admin</h2>
+      <button type="button" id="adminModalClose" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+
+    <!-- Navigation Tab Admin -->
+    <div class="auth-tabs" style="margin-bottom: 12px;">
+      <button type="button" id="tabPendingReports" class="auth-tab is-active" onclick="switchAdminTab('reports')">
+        🚨 Moderasi Laporan
+      </button>
+
+      <button type="button" id="tabManageUsers" class="auth-tab" onclick="switchAdminTab('users')">
+        👥 Kelola Pengguna
+      </button>
+    </div>
+
+    <!-- Area Moderasi Laporan Bencana -->
+    <div id="adminPendingList" class="modal__body" style="gap: 12px; max-height: 60vh; overflow-y: auto;">
+      <!-- Dimuat via admin.js -->
+    </div>
+
+    <!-- Area Kelola Pengguna (Default Hidden) -->
+    <div id="adminUsersList" class="modal__body" style="display:none; gap: 10px; max-height: 60vh; overflow-y: auto;">
+      <!-- Dimuat via admin.js -->
+    </div>
+  </div>
+</div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast" aria-live="polite"></div>
+
+  <!-- Leaflet & Turf JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+
+  <!-- App scripts -->
+  <script src="api.js"></script>
+  <script src="report.js"></script>
+  <script src="stats.js"></script>
+  <script src="map.js"></script>
+  <script src="auth.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>
