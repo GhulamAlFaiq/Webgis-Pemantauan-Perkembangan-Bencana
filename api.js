@@ -383,16 +383,16 @@
       html: `
         <span style="
           display:flex;align-items:center;justify-content:center;
-          width:30px;height:30px;border-radius:50% 50% 50% 0;
+          width:16px;height:16px;border-radius:50% 50% 50% 0;
           background:#2e7d32;transform:rotate(-45deg);
-          box-shadow:0 2px 6px rgba(0,0,0,0.35);border:2px solid #fff;
+          box-shadow:0 1px 4px rgba(0,0,0,0.3);border:1.5px solid #fff;
         ">
-          <i class="fa-solid fa-hospital" style="transform:rotate(45deg);color:#fff;font-size:13px;"></i>
+          <i class="fa-solid fa-hospital" style="transform:rotate(45deg);color:#fff;font-size:8px;"></i>
         </span>
       `,
-      iconSize: [30, 30],
-      iconAnchor: [15, 30],
-      popupAnchor: [0, -28],
+      iconSize: [16, 16],
+      iconAnchor: [8, 16],
+      popupAnchor: [0, -16],
     });
   }
 
@@ -460,7 +460,11 @@
 
     let renderedCount = 0;
     top4Elements.forEach((el) => {
-      const marker = L.marker([el._lat, el._lon], { icon: shelterIcon() });
+      // Ditambahkan zIndexOffset: -1000 agar simbol faskes selalu berada di belakang simbol bencana
+      const marker = L.marker([el._lat, el._lon], { 
+        icon: shelterIcon(),
+        zIndexOffset: -1000 
+      });
       marker.bindPopup(buildShelterPopup(el.tags || {}, el._distance));
       shelterLayerGroup.addLayer(marker);
       renderedCount++;
