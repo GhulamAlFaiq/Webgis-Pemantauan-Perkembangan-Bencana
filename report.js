@@ -355,54 +355,43 @@
   }
 
   async function handleFormSubmit(event) {
-    event.preventDefault();
+  event.preventDefault();
 
-    const latEl = document.getElementById("reportLat");
-    const lngEl = document.getElementById("reportLng");
-    const typeEl = document.getElementById("reportType");
-    const descEl = document.getElementById("reportDescription");
-    const nameEl = document.getElementById("reportName");
-    const photoEl = document.getElementById("reportPhoto");
+  const latEl = document.getElementById("reportLat");
+  const lngEl = document.getElementById("reportLng");
+  const typeEl = document.getElementById("reportType");
+  const descEl = document.getElementById("reportDescription");
+  const nameEl = document.getElementById("reportName");
+  const photoEl = document.getElementById("reportPhoto");
 
-    const lat = parseFloat(latEl ? latEl.value : NaN);
-    const lng = parseFloat(lngEl ? lngEl.value : NaN);
+  const lat = parseFloat(latEl ? latEl.value : NaN);
+  const lng = parseFloat(lngEl ? lngEl.value : NaN);
 
-    if (Number.isNaN(lat) || Number.isNaN(lng)) {
-      showToast("Lokasi belum valid. Silakan pilih titik pada peta terlebih dahulu.");
-      return;
-    }
+  if (Number.isNaN(lat) || Number.isNaN(lng)) {
+    showToast("Lokasi belum valid. Silakan pilih titik pada peta terlebih dahulu.");
+    return;
+  }
 
-    // Upload foto jika ada
+  const file = photoEl && photoEl.files ? photoEl.files[0] : null;
+  if (file && file.size > MAX_PHOTO_BYTES) {
+    showToast("Ukuran foto melebihi batas 4 MB!");
+    return;
+  }
+
+  const submitBtn = document.getElementById("reportSubmitBtn");
+  if (submitBtn) submitBtn.disabled = true;
+
+  try {
+    const reportId = generateReportId();
+
+    // Upload foto (jika ada) — gagal upload = laporan tidak dikirim, bukan diam-diam tanpa foto
     let photoUrl = null;
-    if (photoEl && photoEl.files && photoEl.files[0]) {
-      const file = photoEl.files[0];
-      if (file.size > 4 * 1024 * 1024) {
-        alert("Ukuran foto melebihi batas 4 MB!");
-        return;
-      }
-
-      try {
-        const fileName = `photo_${Date.now()}.${file.name.split('.').pop()}`;
-        const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/disaster-photos/${fileName}`, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Content-Type': file.type
-          },
-          body: file
-        });
-
-        if (uploadRes.ok) {
-          photoUrl = `${SUPABASE_URL}/storage/v1/object/public/disaster-photos/${fileName}`;
-        }
-      } catch (err) {
-        console.error("Gagal upload foto:", err);
-      }
+    if (file) {
+      photoUrl = await uploadPhoto(file, reportId);
     }
 
     const draftReport = {
-      id: generateReportId(),
+      id: reportId,
       lat,
       lng,
       disasterType: typeEl ? typeEl.value : "other",
@@ -411,23 +400,19 @@
       createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + TTL_MS).toISOString(),
       status: "pending",
-      photo_url: photoUrl
+      photoUrl: photoUrl            // ✅ camelCase, sesuai reportToPayload
     };
 
-    const submitBtn = document.getElementById("reportSubmitBtn");
-    if (submitBtn) submitBtn.disabled = true;
-
-    try {
-      await insertReport(draftReport);
-      closeReportModal();
-      showToast("✅ Laporan berhasil dikirim! Menunggu verifikasi admin.");
-    } catch (error) {
-      console.error("Gagal mengirim laporan:", error);
-      showToast(error.message || "Gagal mengirim laporan ke server.");
-    } finally {
-      if (submitBtn) submitBtn.disabled = false;
-    }
+    await insertReport(draftReport);
+    closeReportModal();
+    showToast("✅ Laporan berhasil dikirim! Menunggu verifikasi admin.");
+  } catch (error) {
+    console.error("Gagal mengirim laporan:", error);
+    showToast(error.message || "Gagal mengirim laporan ke server.");
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
   }
+}
 
   document.addEventListener("DOMContentLoaded", () => {
     const form = document.getElementById("reportForm");
