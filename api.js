@@ -286,10 +286,10 @@
       if (result.stale) {
         setStatus(
           "loading",
-          `Data tersimpan (${formatShortNow(new Date(result.cachedAt))}) · ${allMarkers.length} laporan · server tidak merespons`
+          `Data tersimpan (${formatShortNow(new Date(result.cachedAt))}) · server tidak merespons`
         );
       } else {
-        setStatus("ok", `Data termutakhir: ${formatShortNow()} · ${allMarkers.length} laporan`);
+        setStatus("ok", `Data termutakhir: ${formatShortNow()}`);
       }
     } catch (error) {
       console.error("Gagal memuat PetaBencana:", error);
