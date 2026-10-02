@@ -90,7 +90,6 @@
           apikey: SUPABASE_KEY,
           Authorization: `Bearer ${SUPABASE_KEY}`,
           "Content-Type": file.type || "image/jpeg",
-          "x-upsert": "true",
         },
         body: file,
       });
@@ -99,8 +98,10 @@
     }
 
     if (!response.ok) {
-      throw new Error(`Gagal mengunggah foto (status ${response.status}).`);
-    }
+  const errBody = await response.text().catch(() => "");
+  console.error("Upload foto gagal:", response.status, errBody);
+  throw new Error(`Gagal mengunggah foto (status ${response.status}).`);
+}
 
     return `${SUPABASE_URL}/storage/v1/object/public/${PHOTO_BUCKET}/${filename}`;
   }
