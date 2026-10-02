@@ -358,7 +358,6 @@
       try {
         console.log(`Mengirim Overpass Query ke: ${endpoint}`);
         
-        // Timeout 5 detik: Jika 5 detik tidak merespons, batalkan & langsung ganti server
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
@@ -413,19 +412,19 @@
         ? `<div style="font-size:12px;color:#2e7d32;font-weight:600;margin-bottom:4px;"><i class="fa-solid fa-route"></i> Jarak: ±${distanceInKm.toFixed(2)} km dari lokasi bencana</div>`
         : "";
 
-  return `
-    <div style="min-width:190px;font-family:inherit;">
-      <div style="display:flex;align-items:center;gap:6px;font-weight:700;color:#2e7d32;margin-bottom:4px;">
-        <i class="fa-solid fa-hospital"></i> ${escapeHtml(name)}
+    return `
+      <div style="min-width:190px;font-family:inherit;">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:700;color:#2e7d32;margin-bottom:4px;">
+          <i class="fa-solid fa-hospital"></i> ${escapeHtml(name)}
+        </div>
+        <div style="font-size:12.5px;color:#5A6472;margin-bottom:4px;">
+          ${escapeHtml(typeLabel)}
+        </div>
+        ${distLabel}
+        <span class="source-badge overpass">🏥 Sumber: OpenStreetMap (Overpass API)</span>
       </div>
-      <div style="font-size:12.5px;color:#5A6472;margin-bottom:4px;">
-        ${escapeHtml(typeLabel)}
-      </div>
-      ${distLabel}
-      <span class="source-badge overpass">🏥 Sumber: OpenStreetMap (Overpass API)</span>
-    </div>
-  `;
-}
+    `;
+  }
 
   function renderShelterElements(elements, referencePoints) {
     const seenIds = new Set();
@@ -461,7 +460,6 @@
 
     let renderedCount = 0;
     top4Elements.forEach((el) => {
-      // Ditambahkan zIndexOffset: -1000 agar simbol faskes selalu berada di belakang simbol bencana
       const marker = L.marker([el._lat, el._lon], { 
         icon: shelterIcon(),
         zIndexOffset: -1000 
