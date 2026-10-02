@@ -1,28 +1,7 @@
 /* =========================================================
    WebGIS Pemantauan Bencana Indonesia — Multi-API Data Layer
    Sources: PetaBencana.id + BMKG TEWS + Overpass API (OSM)
-
-   Fungsi publik (tidak berubah):
-     window.loadPetaBencanaData(map)
-     window.filterPetaBencanaData(selectedTypes)
-     window.getPetaBencanaReports()
-     window.loadBmkgData(map)
-     window.removeBmkgOverlay(map)
-     window.loadShelterData(map)
-     window.removeShelterOverlay(map)
-
-   Perbaikan utama:
-     - Timeout + retry untuk PetaBencana & BMKG
-     - Cache localStorage: data lama tetap tampil jika API gagal
-     - Overpass: mirror dicoba bertahap (hedged), bukan satu per satu
-       menunggu timeout; mirror yang kalah dibatalkan
-     - Overpass: POST, hasil di-cache, request kembar digabung,
-       respons dipangkas (hanya name + amenity)
-     - Overpass: titik berdekatan digabung, viewport terlalu luas
-       diganti pencarian radius dari titik tengah
-     - Request lama dibatalkan jika layer dinyalakan/dimatikan cepat
-   ========================================================= */
-
+   
 (function () {
   /* Cegah eksekusi ganda jika api.js tidak sengaja dimuat dua kali */
   if (window.__webgisApiLoaded) {
@@ -425,6 +404,7 @@
   const OVERPASS_STAGGER_MS = 2000; // mirror berikutnya dimulai jika yang sebelumnya belum menjawab
   const SHELTER_BUFFER_RADIUS_M = 5000;
   const MAX_BUFFER_POINTS = 10;
+  const SHELTERS_PER_POINT = 4; // fasilitas terdekat yang ditampilkan untuk setiap titik bencana
   const MAX_VIEWPORT_SPAN_DEG = 0.5; // viewport lebih luas dari ini => pakai radius dari titik tengah
   const VIEWPORT_FALLBACK_RADIUS_M = 10000;
   const SHELTER_AMENITY_REGEX = "hospital|clinic|shelter|doctors";
@@ -716,25 +696,43 @@
       if (seenIds.has(uniqueKey)) return;
       seenIds.add(uniqueKey);
 
-      let minDistance = Infinity;
-      if (referencePoints && referencePoints.length > 0) {
-        referencePoints.forEach((pt) => {
-          const dist = getDistanceInKm(pt.lat, pt.lng || pt.lon, lat, lon);
-          if (dist < minDistance) minDistance = dist;
-        });
-      }
-
-      validElements.push({ tags: el.tags || {}, _lat: lat, _lon: lon, _distance: minDistance });
+      validElements.push({ _key: uniqueKey, tags: el.tags || {}, _lat: lat, _lon: lon, _distance: Infinity });
     });
 
-    if (referencePoints && referencePoints.length > 0) {
-      validElements.sort((a, b) => a._distance - b._distance);
+    const hasRefs = referencePoints && referencePoints.length > 0;
+    let selected;
+
+    if (!hasRefs) {
+      selected = validElements.slice(0, SHELTERS_PER_POINT);
+    } else {
+      /* Pilih fasilitas terdekat PER titik, supaya setiap titik bencana kebagian */
+      const chosen = new Map();
+      referencePoints.forEach((pt) => {
+        const ptLng = typeof pt.lng === "number" ? pt.lng : pt.lon;
+        validElements
+          .map((el) => ({ el, d: getDistanceInKm(pt.lat, ptLng, el._lat, el._lon) }))
+          .sort((a, b) => a.d - b.d)
+          .slice(0, SHELTERS_PER_POINT)
+          .forEach(({ el }) => chosen.set(el._key, el));
+      });
+
+      selected = Array.from(chosen.values());
+
+      /* Jarak di popup = jarak ke titik bencana terdekat */
+      selected.forEach((el) => {
+        let minDistance = Infinity;
+        referencePoints.forEach((pt) => {
+          const ptLng = typeof pt.lng === "number" ? pt.lng : pt.lon;
+          const dist = getDistanceInKm(pt.lat, ptLng, el._lat, el._lon);
+          if (dist < minDistance) minDistance = dist;
+        });
+        el._distance = minDistance;
+      });
+      selected.sort((a, b) => a._distance - b._distance);
     }
 
-    const top4Elements = validElements.slice(0, 4);
-
     let renderedCount = 0;
-    top4Elements.forEach((el) => {
+    selected.forEach((el) => {
       const marker = L.marker([el._lat, el._lon], {
         icon: shelterIcon(),
         zIndexOffset: -1000,
