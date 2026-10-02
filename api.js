@@ -352,26 +352,34 @@
   }
 
   /* Pemanggilan API dengan POST Method dan Multi-Endpoint Fallback */
+  // Daftar mirror server Overpass publik alternatif yang lebih stabil & cepat
+  const OVERPASS_ENDPOINTS = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    "https://overpass-api.de/api/interpreter"
+  ];
+
   async function fetchOverpass(query) {
-    console.log("📡 Mengirim Overpass Query...");
     for (const endpoint of OVERPASS_ENDPOINTS) {
       try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: "data=" + encodeURIComponent(query),
+        console.log(`Mengirim Overpass Query ke: ${endpoint}`);
+        
+        // Timeout 5 detik: Jika 5 detik tidak merespons, batalkan & langsung ganti server
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        const response = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`, {
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
-        if (!response.ok) {
-          console.warn(`⚠️ Endpoint Overpass (${endpoint}) HTTP Status: ${response.status}`);
-          continue;
+        if (response.ok) {
+          return await response.json();
         }
-
-        const data = await response.json();
-        console.log(`✅ Respon Overpass API (${endpoint}):`, data);
-        return data;
+        console.warn(`Endpoint ${endpoint} merespons HTTP Status: ${response.status}`);
       } catch (err) {
-        console.warn(`⚠️ Gagal terhubung ke Overpass (${endpoint}):`, err);
+        console.warn(`Gagal terhubung ke ${endpoint}:`, err.message);
       }
     }
     throw new Error("Semua endpoint Overpass API gagal merespons.");
