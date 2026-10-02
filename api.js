@@ -266,153 +266,152 @@
     if (bmkgLayerGroup) map.removeLayer(bmkgLayerGroup);
   };
 
- /* =========================================================
-   Overpass API — Faskes Terdekat (POST Method + Multi Mirror)
-   ========================================================= */
+  /* =========================================================
+     Overpass API — Faskes Terdekat (POST Method + Multi Mirror)
+     ========================================================= */
 
-// Deklarasi tunggal daftar mirror server Overpass publik
-const OVERPASS_ENDPOINTS = [
-  "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.private.coffee/api/interpreter",
-  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-  "https://overpass-api.de/api/interpreter"
-];
+  const OVERPASS_ENDPOINTS = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    "https://overpass-api.de/api/interpreter"
+  ];
 
-const SHELTER_BUFFER_RADIUS_M = 5000;
-const MAX_BUFFER_POINTS = 10;
-const SHELTER_AMENITY_REGEX = "hospital|clinic|shelter|doctors";
-const EARTHQUAKE_EXCLUDED_TYPES = ["gempa", "earthquake", "prep"];
+  const SHELTER_BUFFER_RADIUS_M = 5000;
+  const MAX_BUFFER_POINTS = 10;
+  const SHELTER_AMENITY_REGEX = "hospital|clinic|shelter|doctors";
+  const EARTHQUAKE_EXCLUDED_TYPES = ["gempa", "earthquake", "prep"];
 
-let shelterLayerGroup = null;
+  let shelterLayerGroup = null;
 
-/* Hitung Jarak Haversine (km) */
-function getDistanceInKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-function getActiveNonEarthquakeDisasterPoints() {
-  const points = [];
-
-  if (typeof window.getPetaBencanaReports === "function") {
-    window.getPetaBencanaReports().forEach((entry) => {
-      if (!entry.latlng) return;
-      points.push({
-        lat: entry.latlng.lat,
-        lng: entry.latlng.lng,
-        type: (entry.type || "other").toLowerCase(),
-        createdAt: entry.createdAt || null,
-      });
-    });
+  /* Hitung Jarak Haversine (km) */
+  function getDistanceInKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
   }
 
-  if (typeof window.getUserReports === "function") {
-    window.getUserReports().forEach((report) => {
-      if (typeof report.lat !== "number" || typeof report.lng !== "number") return;
-      points.push({
-        lat: report.lat,
-        lng: report.lng,
-        type: (report.disasterType || "other").toLowerCase(),
-        createdAt: report.createdAt || null,
+  function getActiveNonEarthquakeDisasterPoints() {
+    const points = [];
+
+    if (typeof window.getPetaBencanaReports === "function") {
+      window.getPetaBencanaReports().forEach((entry) => {
+        if (!entry.latlng) return;
+        points.push({
+          lat: entry.latlng.lat,
+          lng: entry.latlng.lng,
+          type: (entry.type || "other").toLowerCase(),
+          createdAt: entry.createdAt || null,
+        });
       });
-    });
-  }
-
-  const nonEarthquakePoints = points.filter(
-    (point) => !EARTHQUAKE_EXCLUDED_TYPES.includes(point.type)
-  );
-
-  nonEarthquakePoints.sort((a, b) => {
-    const aTime = a.createdAt ? new Date(a.createdAt).getTime() : -Infinity;
-    const bTime = b.createdAt ? new Date(b.createdAt).getTime() : -Infinity;
-    return bTime - aTime;
-  });
-
-  return nonEarthquakePoints.slice(0, MAX_BUFFER_POINTS);
-}
-
-function buildBufferOverpassQuery(points) {
-  const aroundQueries = points.map(
-    (point) =>
-      `nwr["amenity"~"${SHELTER_AMENITY_REGEX}"](around:${SHELTER_BUFFER_RADIUS_M},${point.lat},${point.lng});`
-  );
-  return `[out:json][timeout:25];(${aroundQueries.join("")});out center;`;
-}
-
-function buildViewportOverpassQuery(bounds) {
-  const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
-  return `[out:json][timeout:25];nwr["amenity"~"${SHELTER_AMENITY_REGEX}"](${bbox});out center;`;
-}
-
-/* Pemanggilan API dengan Multi-Endpoint Fallback */
-async function fetchOverpass(query) {
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      console.log(`Mengirim Overpass Query ke: ${endpoint}`);
-      
-      // Timeout 5 detik: Jika 5 detik tidak merespons, batalkan & langsung ganti server
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      const response = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        return await response.json();
-      }
-      console.warn(`Endpoint ${endpoint} merespons HTTP Status: ${response.status}`);
-    } catch (err) {
-      console.warn(`Gagal terhubung ke ${endpoint}:`, err.message);
     }
+
+    if (typeof window.getUserReports === "function") {
+      window.getUserReports().forEach((report) => {
+        if (typeof report.lat !== "number" || typeof report.lng !== "number") return;
+        points.push({
+          lat: report.lat,
+          lng: report.lng,
+          type: (report.disasterType || "other").toLowerCase(),
+          createdAt: report.createdAt || null,
+        });
+      });
+    }
+
+    const nonEarthquakePoints = points.filter(
+      (point) => !EARTHQUAKE_EXCLUDED_TYPES.includes(point.type)
+    );
+
+    nonEarthquakePoints.sort((a, b) => {
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : -Infinity;
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : -Infinity;
+      return bTime - aTime;
+    });
+
+    return nonEarthquakePoints.slice(0, MAX_BUFFER_POINTS);
   }
-  throw new Error("Semua endpoint Overpass API gagal merespons.");
-}
 
-function shelterIcon() {
-  return L.divIcon({
-    className: "pb-marker",
-    html: `
-      <span style="
-        display:flex;align-items:center;justify-content:center;
-        width:16px;height:16px;border-radius:50% 50% 50% 0;
-        background:#2e7d32;transform:rotate(-45deg);
-        box-shadow:0 1px 4px rgba(0,0,0,0.3);border:1.5px solid #fff;
-      ">
-        <i class="fa-solid fa-hospital" style="transform:rotate(45deg);color:#fff;font-size:8px;"></i>
-      </span>
-    `,
-    iconSize: [16, 16],
-    iconAnchor: [8, 16],
-    popupAnchor: [0, -16],
-  });
-}
+  function buildBufferOverpassQuery(points) {
+    const aroundQueries = points.map(
+      (point) =>
+        `nwr["amenity"~"${SHELTER_AMENITY_REGEX}"](around:${SHELTER_BUFFER_RADIUS_M},${point.lat},${point.lng});`
+    );
+    return `[out:json][timeout:25];(${aroundQueries.join("")});out center;`;
+  }
 
-function shelterTypeLabel(amenity) {
-  if (amenity === "hospital") return "Rumah Sakit";
-  if (amenity === "clinic") return "Klinik / Puskesmas";
-  if (amenity === "shelter") return "Tempat Perlindungan";
-  if (amenity === "doctors") return "Praktik Dokter";
-  return titleCase(amenity || "Fasilitas Kesehatan");
-}
+  function buildViewportOverpassQuery(bounds) {
+    const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+    return `[out:json][timeout:25];nwr["amenity"~"${SHELTER_AMENITY_REGEX}"](${bbox});out center;`;
+  }
 
-function buildShelterPopup(tags, distanceInKm) {
-  const name = (tags && tags.name && tags.name.trim()) || "Fasilitas Kesehatan";
-  const typeLabel = shelterTypeLabel(tags && tags.amenity);
-  const distLabel =
-    typeof distanceInKm === "number" && distanceInKm !== Infinity
-      ? `<div style="font-size:12px;color:#2e7d32;font-weight:600;margin-bottom:4px;"><i class="fa-solid fa-route"></i> Jarak: ±${distanceInKm.toFixed(2)} km dari lokasi bencana</div>`
-      : "";
+  /* Pemanggilan API dengan Multi-Endpoint Fallback */
+  async function fetchOverpass(query) {
+    for (const endpoint of OVERPASS_ENDPOINTS) {
+      try {
+        console.log(`Mengirim Overpass Query ke: ${endpoint}`);
+        
+        // Timeout 5 detik: Jika 5 detik tidak merespons, batalkan & langsung ganti server
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        const response = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`, {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          return await response.json();
+        }
+        console.warn(`Endpoint ${endpoint} merespons HTTP Status: ${response.status}`);
+      } catch (err) {
+        console.warn(`Gagal terhubung ke ${endpoint}:`, err.message);
+      }
+    }
+    throw new Error("Semua endpoint Overpass API gagal merespons.");
+  }
+
+  function shelterIcon() {
+    return L.divIcon({
+      className: "pb-marker",
+      html: `
+        <span style="
+          display:flex;align-items:center;justify-content:center;
+          width:16px;height:16px;border-radius:50% 50% 50% 0;
+          background:#2e7d32;transform:rotate(-45deg);
+          box-shadow:0 1px 4px rgba(0,0,0,0.3);border:1.5px solid #fff;
+        ">
+          <i class="fa-solid fa-hospital" style="transform:rotate(45deg);color:#fff;font-size:8px;"></i>
+        </span>
+      `,
+      iconSize: [16, 16],
+      iconAnchor: [8, 16],
+      popupAnchor: [0, -16],
+    });
+  }
+
+  function shelterTypeLabel(amenity) {
+    if (amenity === "hospital") return "Rumah Sakit";
+    if (amenity === "clinic") return "Klinik / Puskesmas";
+    if (amenity === "shelter") return "Tempat Perlindungan";
+    if (amenity === "doctors") return "Praktik Dokter";
+    return titleCase(amenity || "Fasilitas Kesehatan");
+  }
+
+  function buildShelterPopup(tags, distanceInKm) {
+    const name = (tags && tags.name && tags.name.trim()) || "Fasilitas Kesehatan";
+    const typeLabel = shelterTypeLabel(tags && tags.amenity);
+    const distLabel =
+      typeof distanceInKm === "number" && distanceInKm !== Infinity
+        ? `<div style="font-size:12px;color:#2e7d32;font-weight:600;margin-bottom:4px;"><i class="fa-solid fa-route"></i> Jarak: ±${distanceInKm.toFixed(2)} km dari lokasi bencana</div>`
+        : "";
 
   return `
     <div style="min-width:190px;font-family:inherit;">
@@ -428,115 +427,116 @@ function buildShelterPopup(tags, distanceInKm) {
   `;
 }
 
-function renderShelterElements(elements, referencePoints) {
-  const seenIds = new Set();
-  const validElements = [];
+  function renderShelterElements(elements, referencePoints) {
+    const seenIds = new Set();
+    const validElements = [];
 
-  elements.forEach((el) => {
-    const lat = typeof el.lat === "number" ? el.lat : (el.center && typeof el.center.lat === "number" ? el.center.lat : null);
-    const lon = typeof el.lon === "number" ? el.lon : (el.center && typeof el.center.lon === "number" ? el.center.lon : null);
+    elements.forEach((el) => {
+      const lat = typeof el.lat === "number" ? el.lat : (el.center && typeof el.center.lat === "number" ? el.center.lat : null);
+      const lon = typeof el.lon === "number" ? el.lon : (el.center && typeof el.center.lon === "number" ? el.center.lon : null);
 
-    if (lat === null || lon === null) return;
-    if (seenIds.has(el.id)) return;
-    seenIds.add(el.id);
+      if (lat === null || lon === null) return;
+      if (seenIds.has(el.id)) return;
+      seenIds.add(el.id);
 
-    let minDistance = Infinity;
-    if (referencePoints && referencePoints.length > 0) {
-      referencePoints.forEach((pt) => {
-        const dist = getDistanceInKm(pt.lat, pt.lng || pt.lon, lat, lon);
-        if (dist < minDistance) minDistance = dist;
-      });
-    }
+      let minDistance = Infinity;
+      if (referencePoints && referencePoints.length > 0) {
+        referencePoints.forEach((pt) => {
+          const dist = getDistanceInKm(pt.lat, pt.lng || pt.lon, lat, lon);
+          if (dist < minDistance) minDistance = dist;
+        });
+      }
 
-    el._lat = lat;
-    el._lon = lon;
-    el._distance = minDistance;
-    validElements.push(el);
-  });
-
-  if (referencePoints && referencePoints.length > 0) {
-    validElements.sort((a, b) => a._distance - b._distance);
-  }
-
-  const top4Elements = validElements.slice(0, 4);
-
-  let renderedCount = 0;
-  top4Elements.forEach((el) => {
-    // Simbol faskes diletakkan di belakang ikon bencana
-    const marker = L.marker([el._lat, el._lon], { 
-      icon: shelterIcon(),
-      zIndexOffset: -1000 
+      el._lat = lat;
+      el._lon = lon;
+      el._distance = minDistance;
+      validElements.push(el);
     });
-    marker.bindPopup(buildShelterPopup(el.tags || {}, el._distance));
-    shelterLayerGroup.addLayer(marker);
-    renderedCount++;
-  });
 
-  console.log(`🏥 Berhasil merender ${renderedCount} titik faskes terdekat.`);
-  return renderedCount;
-}
-
-async function loadShelterViewportFallback(map, notify) {
-  try {
-    const query = buildViewportOverpassQuery(map.getBounds());
-    const payload = await fetchOverpass(query);
-    const elements = Array.isArray(payload.elements) ? payload.elements : [];
-    
-    const center = map.getCenter();
-    const referencePoints = [{ lat: center.lat, lng: center.lng }];
-    
-    const renderedCount = renderShelterElements(elements, referencePoints);
-
-    if (renderedCount === 0 && notify) {
-      notify("Tidak ditemukan fasilitas kesehatan pada tampilan peta saat ini.");
+    if (referencePoints && referencePoints.length > 0) {
+      validElements.sort((a, b) => a._distance - b._distance);
     }
-  } catch (error) {
-    console.error("Gagal memuat data faskes fallback Overpass:", error);
-    setStatus("error", "Gagal memuat titik evakuasi/faskes (Overpass API)");
-    if (notify) notify("Gagal memuat data faskes. Coba lagi nanti.");
-  }
-}
 
-window.loadShelterData = async function loadShelterData(map) {
-  if (!shelterLayerGroup) shelterLayerGroup = L.layerGroup();
+    const top4Elements = validElements.slice(0, 4);
 
-  shelterLayerGroup.clearLayers();
-  shelterLayerGroup.addTo(map);
+    let renderedCount = 0;
+    top4Elements.forEach((el) => {
+      // Ditambahkan zIndexOffset: -1000 agar simbol faskes selalu berada di belakang simbol bencana
+      const marker = L.marker([el._lat, el._lon], { 
+        icon: shelterIcon(),
+        zIndexOffset: -1000 
+      });
+      marker.bindPopup(buildShelterPopup(el.tags || {}, el._distance));
+      shelterLayerGroup.addLayer(marker);
+      renderedCount++;
+    });
 
-  const notify = typeof window.showToast === "function" ? window.showToast : null;
-  const points = getActiveNonEarthquakeDisasterPoints();
-
-  if (points.length === 0) {
-    if (notify) notify("Tidak ada bencana aktif — menampilkan faskes pada tampilan peta.");
-    await loadShelterViewportFallback(map, notify);
-    return;
+    console.log(`🏥 Berhasil merender ${renderedCount} titik faskes terdekat.`);
+    return renderedCount;
   }
 
-  points.forEach((point) => {
-    L.circle([point.lat, point.lng], {
-      radius: SHELTER_BUFFER_RADIUS_M,
-      color: "#2e7d32",
-      weight: 1,
-      dashArray: "4, 4",
-      fillOpacity: 0.08,
-    }).addTo(shelterLayerGroup);
-  });
+  async function loadShelterViewportFallback(map, notify) {
+    try {
+      const query = buildViewportOverpassQuery(map.getBounds());
+      const payload = await fetchOverpass(query);
+      const elements = Array.isArray(payload.elements) ? payload.elements : [];
+      
+      const center = map.getCenter();
+      const referencePoints = [{ lat: center.lat, lng: center.lng }];
+      
+      const renderedCount = renderShelterElements(elements, referencePoints);
 
-  try {
-    const query = buildBufferOverpassQuery(points);
-    const payload = await fetchOverpass(query);
-    const elements = Array.isArray(payload.elements) ? payload.elements : [];
-    const renderedCount = renderShelterElements(elements, points);
+      if (renderedCount === 0 && notify) {
+        notify("Tidak ditemukan fasilitas kesehatan pada tampilan peta saat ini.");
+      }
+    } catch (error) {
+      console.error("Gagal memuat data faskes fallback Overpass:", error);
+      setStatus("error", "Gagal memuat titik evakuasi/faskes (Overpass API)");
+      if (notify) notify("Gagal memuat data faskes. Coba lagi nanti.");
+    }
+  }
 
-    if (renderedCount === 0) {
+  window.loadShelterData = async function loadShelterData(map) {
+    if (!shelterLayerGroup) shelterLayerGroup = L.layerGroup();
+
+    shelterLayerGroup.clearLayers();
+    shelterLayerGroup.addTo(map);
+
+    const notify = typeof window.showToast === "function" ? window.showToast : null;
+    const points = getActiveNonEarthquakeDisasterPoints();
+
+    if (points.length === 0) {
+      if (notify) notify("Tidak ada bencana aktif — menampilkan faskes pada tampilan peta.");
+      await loadShelterViewportFallback(map, notify);
+      return;
+    }
+
+    points.forEach((point) => {
+      L.circle([point.lat, point.lng], {
+        radius: SHELTER_BUFFER_RADIUS_M,
+        color: "#2e7d32",
+        weight: 1,
+        dashArray: "4, 4",
+        fillOpacity: 0.08,
+      }).addTo(shelterLayerGroup);
+    });
+
+    try {
+      const query = buildBufferOverpassQuery(points);
+      const payload = await fetchOverpass(query);
+      const elements = Array.isArray(payload.elements) ? payload.elements : [];
+      const renderedCount = renderShelterElements(elements, points);
+
+      if (renderedCount === 0) {
+        await loadShelterViewportFallback(map, notify);
+      }
+    } catch (error) {
+      console.error("Gagal memuat data faskes Overpass:", error);
       await loadShelterViewportFallback(map, notify);
     }
-  } catch (error) {
-    console.error("Gagal memuat data faskes Overpass:", error);
-    await loadShelterViewportFallback(map, notify);
-  }
-};
+  };
 
-window.removeShelterOverlay = function removeShelterOverlay(map) {
-  if (shelterLayerGroup) map.removeLayer(shelterLayerGroup);
-};
+  window.removeShelterOverlay = function removeShelterOverlay(map) {
+    if (shelterLayerGroup) map.removeLayer(shelterLayerGroup);
+  };
+})();
