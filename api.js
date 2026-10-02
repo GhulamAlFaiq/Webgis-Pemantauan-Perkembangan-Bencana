@@ -1,7 +1,28 @@
 /* =========================================================
    WebGIS Pemantauan Bencana Indonesia — Multi-API Data Layer
    Sources: PetaBencana.id + BMKG TEWS + Overpass API (OSM)
-   
+
+   Fungsi publik (tidak berubah):
+     window.loadPetaBencanaData(map)
+     window.filterPetaBencanaData(selectedTypes)
+     window.getPetaBencanaReports()
+     window.loadBmkgData(map)
+     window.removeBmkgOverlay(map)
+     window.loadShelterData(map)
+     window.removeShelterOverlay(map)
+
+   Perbaikan utama:
+     - Timeout + retry untuk PetaBencana & BMKG
+     - Cache localStorage: data lama tetap tampil jika API gagal
+     - Overpass: mirror dicoba bertahap (hedged), bukan satu per satu
+       menunggu timeout; mirror yang kalah dibatalkan
+     - Overpass: POST, hasil di-cache, request kembar digabung,
+       respons dipangkas (hanya name + amenity)
+     - Overpass: titik berdekatan digabung, viewport terlalu luas
+       diganti pencarian radius dari titik tengah
+     - Request lama dibatalkan jika layer dinyalakan/dimatikan cepat
+   ========================================================= */
+
 (function () {
   /* Cegah eksekusi ganda jika api.js tidak sengaja dimuat dua kali */
   if (window.__webgisApiLoaded) {
