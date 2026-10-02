@@ -425,6 +425,7 @@
   const OVERPASS_STAGGER_MS = 2000; // mirror berikutnya dimulai jika yang sebelumnya belum menjawab
   const SHELTER_BUFFER_RADIUS_M = 5000;
   const MAX_BUFFER_POINTS = 10;
+  const SHELTER_FALLBACK_RADIUS_M = 15000; // radius pencarian ulang untuk titik yang tidak punya faskes dalam 5 km
   const SHELTERS_PER_POINT = 4; // fasilitas terdekat yang ditampilkan untuk setiap titik bencana
   const MAX_VIEWPORT_SPAN_DEG = 0.5; // viewport lebih luas dari ini => pakai radius dari titik tengah
   const VIEWPORT_FALLBACK_RADIUS_M = 10000;
@@ -432,6 +433,7 @@
   const EARTHQUAKE_EXCLUDED_TYPES = ["gempa", "earthquake", "prep"];
 
   let shelterLayerGroup = null;
+  const renderedShelterKeys = new Set(); // cegah marker faskes dobel antar-pencarian
   let shelterRequestId = 0; // penanda request terbaru, request lama dibuang
   const overpassInflight = new Map();
 
@@ -500,10 +502,11 @@
     return unique.slice(0, MAX_BUFFER_POINTS);
   }
 
-  function buildBufferOverpassQuery(points) {
+  function buildBufferOverpassQuery(points, radiusM) {
+    const radius = radiusM || SHELTER_BUFFER_RADIUS_M;
     const aroundQueries = points.map(
       (point) =>
-        `nwr["amenity"~"${SHELTER_AMENITY_REGEX}"](around:${SHELTER_BUFFER_RADIUS_M},${point.lat.toFixed(4)},${point.lng.toFixed(4)});`
+        `nwr["amenity"~"${SHELTER_AMENITY_REGEX}"](around:${radius},${point.lat.toFixed(4)},${point.lng.toFixed(4)});`
     );
     return `[out:json][timeout:20];(${aroundQueries.join("")});out tags center;`;
   }
@@ -692,7 +695,10 @@
     `;
   }
 
-  function renderShelterElements(elements, referencePoints) {
+  /* Render faskes terdekat PER titik, hanya yang berada dalam maxRadiusKm dari titik tersebut.
+     Mengembalikan jumlah marker baru dan daftar titik yang tidak punya faskes dalam radius. */
+  function renderShelterElements(elements, referencePoints, maxRadiusKm) {
+    const limitKm = typeof maxRadiusKm === "number" ? maxRadiusKm : Infinity;
     const seenIds = new Set();
     const validElements = [];
 
@@ -721,20 +727,30 @@
     });
 
     const hasRefs = referencePoints && referencePoints.length > 0;
+    const emptyPoints = [];
     let selected;
 
     if (!hasRefs) {
       selected = validElements.slice(0, SHELTERS_PER_POINT);
     } else {
-      /* Pilih fasilitas terdekat PER titik, supaya setiap titik bencana kebagian */
       const chosen = new Map();
+
       referencePoints.forEach((pt) => {
         const ptLng = typeof pt.lng === "number" ? pt.lng : pt.lon;
-        validElements
+        const nearby = validElements
           .map((el) => ({ el, d: getDistanceInKm(pt.lat, ptLng, el._lat, el._lon) }))
+          .filter((item) => item.d <= limitKm)
           .sort((a, b) => a.d - b.d)
-          .slice(0, SHELTERS_PER_POINT)
-          .forEach(({ el }) => chosen.set(el._key, el));
+          .slice(0, SHELTERS_PER_POINT);
+
+        console.log(
+          `📍 Titik (${pt.lat.toFixed(4)}, ${Number(ptLng).toFixed(4)}): ${nearby.length} faskes dalam ${
+            limitKm === Infinity ? "tampilan peta" : limitKm + " km"
+          }`
+        );
+
+        if (nearby.length === 0) emptyPoints.push(pt);
+        nearby.forEach(({ el }) => chosen.set(el._key, el));
       });
 
       selected = Array.from(chosen.values());
@@ -754,6 +770,9 @@
 
     let renderedCount = 0;
     selected.forEach((el) => {
+      if (renderedShelterKeys.has(el._key)) return; // sudah tampil dari pencarian sebelumnya
+      renderedShelterKeys.add(el._key);
+
       const marker = L.marker([el._lat, el._lon], {
         icon: shelterIcon(),
         zIndexOffset: -1000,
@@ -763,8 +782,8 @@
       renderedCount++;
     });
 
-    console.log(`🏥 Berhasil merender ${renderedCount} titik faskes terdekat.`);
-    return renderedCount;
+    console.log(`🏥 Berhasil merender ${renderedCount} titik faskes baru.`);
+    return { renderedCount, emptyPoints };
   }
 
   async function loadShelterViewportFallback(map, notify, isStale) {
@@ -778,9 +797,9 @@
       const center = map.getCenter();
       const referencePoints = [{ lat: center.lat, lng: center.lng }];
 
-      const renderedCount = renderShelterElements(elements, referencePoints);
+      const result = renderShelterElements(elements, referencePoints, Infinity);
 
-      if (renderedCount === 0 && notify) {
+      if (result.renderedCount === 0 && notify) {
         notify("Tidak ditemukan fasilitas kesehatan pada tampilan peta saat ini.");
       }
     } catch (error) {
@@ -798,6 +817,7 @@
     if (!shelterLayerGroup) shelterLayerGroup = L.layerGroup();
 
     shelterLayerGroup.clearLayers();
+    renderedShelterKeys.clear();
     shelterLayerGroup.addTo(map);
 
     const notify = typeof window.showToast === "function" ? window.showToast : null;
@@ -820,14 +840,36 @@
     });
 
     try {
-      const query = buildBufferOverpassQuery(points);
-      const payload = await fetchOverpass(query);
+      /* Tahap 1: faskes dalam radius 5 km dari setiap titik */
+      const payload = await fetchOverpass(buildBufferOverpassQuery(points));
       if (isStale()) return;
 
       const elements = Array.isArray(payload.elements) ? payload.elements : [];
-      const renderedCount = renderShelterElements(elements, points);
+      const first = renderShelterElements(elements, points, SHELTER_BUFFER_RADIUS_M / 1000);
+      let total = first.renderedCount;
 
-      if (renderedCount === 0) {
+      /* Tahap 2: titik yang kosong dicarikan faskes dalam radius lebih lebar */
+      if (first.emptyPoints.length > 0) {
+        if (notify) {
+          notify(
+            `${first.emptyPoints.length} titik tidak punya faskes dalam ${SHELTER_BUFFER_RADIUS_M / 1000} km, mencari hingga ${SHELTER_FALLBACK_RADIUS_M / 1000} km...`
+          );
+        }
+        try {
+          const widePayload = await fetchOverpass(
+            buildBufferOverpassQuery(first.emptyPoints, SHELTER_FALLBACK_RADIUS_M)
+          );
+          if (isStale()) return;
+
+          const wideElements = Array.isArray(widePayload.elements) ? widePayload.elements : [];
+          const wide = renderShelterElements(wideElements, first.emptyPoints, SHELTER_FALLBACK_RADIUS_M / 1000);
+          total += wide.renderedCount;
+        } catch (wideError) {
+          console.warn("Pencarian faskes radius lebar gagal:", wideError);
+        }
+      }
+
+      if (total === 0) {
         await loadShelterViewportFallback(map, notify, isStale);
       }
     } catch (error) {
